@@ -26,10 +26,15 @@ def simplify(data: dict):
                 properties = value
                 for key, value in properties.items():
                     #row[key] = value['title'][0]['plain_text']
-                    if value['type'] == 'title':
+                    str_type = value['type']
+                    if str_type == 'title':
                         if value['title']:
                             title = value['title'][0]
                             row[key] = title['plain_text']
+                    elif str_type == 'select':
+                        if value['select']:
+                            select = value['select']
+                            row[key] = select['name']
                     else:
                         row[key] = value
         rows.append(row)
