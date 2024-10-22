@@ -27,6 +27,11 @@ def main():
         required=True,
         help='Notion database ID',
     )
+    parser.add_argument(
+        '--simplify', '-S',
+        action='store_true',
+        help='Simplify output',
+    )
     args = parser.parse_args()
     logger.debug('args: %s', args)
     token = args.token
@@ -40,7 +45,26 @@ def main():
             "database_id": args.database_id,
         }
     )
-    dump_json(res)
+    if not args.simplify:
+        dump_json(res)
+    else:
+        results = res['results']
+        rows = []
+        for result in results:
+            row = {}
+            for key, value in result.items():
+                if key == 'properties':
+                    properties = value
+                    for key, value in properties.items():
+                        #row[key] = value['title'][0]['plain_text']
+                        if value['type'] == 'title':
+                            if value['title']:
+                                title = value['title'][0]
+                                row[key] = title['plain_text']
+                        else:
+                            row[key] = value
+            rows.append(row)
+        dump_json(rows)
 
 if __name__ == "__main__":
     main()
