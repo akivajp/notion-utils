@@ -31,10 +31,22 @@ def simplify(data: dict):
                         if value['title']:
                             title = value['title'][0]
                             row[key] = title['plain_text']
+                    elif str_type == 'number':
+                        #if value['number']:
+                        #    row[key] = value['number']
+                        row[key] = value['number']
+                    elif str_type == 'rich_text':
+                        if value['rich_text']:
+                            rich_text = value['rich_text'][0]
+                            row[key] = rich_text['plain_text']
                     elif str_type == 'select':
                         if value['select']:
                             select = value['select']
                             row[key] = select['name']
+                    elif str_type == 'multi_select':
+                        if value['multi_select']:
+                            multi_select = value['multi_select']
+                            row[key] = [item['name'] for item in multi_select]
                     else:
                         row[key] = value
         rows.append(row)
