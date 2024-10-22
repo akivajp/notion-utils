@@ -16,6 +16,25 @@ def dump_json(data: dict):
     else:
         print(json.dumps(data, indent=2))
 
+def simplify(data: dict):
+    results = data['results']
+    rows = []
+    for result in results:
+        row = {}
+        for key, value in result.items():
+            if key == 'properties':
+                properties = value
+                for key, value in properties.items():
+                    #row[key] = value['title'][0]['plain_text']
+                    if value['type'] == 'title':
+                        if value['title']:
+                            title = value['title'][0]
+                            row[key] = title['plain_text']
+                    else:
+                        row[key] = value
+        rows.append(row)
+    return rows
+
 def main():
     parser = argparse.ArgumentParser(description='Dump Notion database')
     parser.add_argument(
@@ -48,22 +67,7 @@ def main():
     if not args.simplify:
         dump_json(res)
     else:
-        results = res['results']
-        rows = []
-        for result in results:
-            row = {}
-            for key, value in result.items():
-                if key == 'properties':
-                    properties = value
-                    for key, value in properties.items():
-                        #row[key] = value['title'][0]['plain_text']
-                        if value['type'] == 'title':
-                            if value['title']:
-                                title = value['title'][0]
-                                row[key] = title['plain_text']
-                        else:
-                            row[key] = value
-            rows.append(row)
+        rows = simplify(res)
         dump_json(rows)
 
 if __name__ == "__main__":
