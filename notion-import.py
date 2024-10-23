@@ -42,8 +42,9 @@ def map_row(
                 stripped_column = re.sub(r'\n', ' ', stripped_column) # 改行のスペース化
                 if stripped_column in mapping:
                     return mapping[stripped_column]
+                logger.debug('column: "%s"', column)
                 return {}
-            logger.debug('column: "%s"', column)
+            #logger.debug('column: "%s"', column)
             #map_item = map_config.get(column, {})
             #map_item = map_config.get(column.strip(), {})
             map_item = get_map_item()
@@ -54,59 +55,151 @@ def map_row(
     logger.debug('map_config: %s', map_config)
     if map_config:
         assign_table = map_config.get('assign', {})
-        logger.debug('assign_table: %s', assign_table)
+        #logger.debug('assign_table: %s', assign_table)
         for db_column, value in assign_table.items():
             new_row[db_column] = value
     return new_row
+
+def get_filter(
+    schema: dict,
+    row: dict,
+    map_config: dict|None = None,
+):
+    filters = []
+    for column, value in row.items():
+        if map_config:
+            primary = map_config.get('primary', {})
+            if column not in primary:
+                continue
+        db_type = schema.get(column, {}).get('type', None)
+        if db_type == 'title':
+            filters.append({
+                "property": column,
+                "title": {
+                    "equals": str(value),
+                },
+            })
+        elif db_type == 'number':
+            filters.append({
+                "property": column,
+                "number": {
+                    "equals": float(value),
+                },
+            })
+        elif db_type == 'select':
+            filters.append({
+                "property": column,
+                "select": {
+                    "equals": str(value),
+                },
+            })
+    return {"and": filters}
+
+def filter_db(
+    client: Client,
+    database_id: str,
+    filter: dict,
+) -> dict:
+    res = client.databases.query(
+        **{
+            "database_id": database_id,
+            "filter": filter,
+        }
+    )
+    #logger.debug('res: %s', json.dumps(res, indent=2, ensure_ascii=False))
+    return res['results']
+
+def get_properties(
+    schema: dict,
+    row: dict,
+):
+    properties = {}
+    for column, value in row.items():
+        db_type = schema.get(column, {}).get('type', None)
+        if db_type == 'title':
+            properties[column] = {
+                "title": [
+                    {
+                        "text": {
+                            "content": str(value),
+                        },
+                    },
+                ],
+            }
+        elif db_type == 'number':
+            properties[column] = {
+                "number": float(value),
+            }
+        elif db_type == 'rich_text':
+            properties[column] = {
+                "rich_text": [
+                    {
+                        "text": {
+                            "content": str(value),
+                        },
+                    },
+                ],
+            }
+        elif db_type == 'select':
+            properties[column] = {
+                "select": {
+                    "name": str(value),
+                },
+            }
+    return properties
 
 def import_df(
     client: Client,
     database_id: str,
     df: pd.DataFrame,
     map_config: dict|None = None,
+    before: int|None = None,
+    after: int|None = None,
 ):
     schema = get_schema(client, database_id)
     #logger.debug('schema: %s', json.dumps(schema, indent=2, ensure_ascii=False))
     #return
     for index, row in df.iterrows():
         #if index > 0:
-        if index > 1:
+        #if index > 10:
+        #    break
+        #if test and index >= test:
+        #    break
+        if before and index >= before:
             break
-        properties = {}
+        if after and index < after:
+            continue
+        #properties = {}
         mapped_row = map_row(row, map_config)
         logger.debug('mapped_row: %s', mapped_row)
         #for column, value in row.items():
-        for column, value in mapped_row.items():
-            db_type = schema.get(column, {}).get('type', None)
-            if db_type == 'title':
-                properties[column] = {
-                    "title": [
-                        {
-                            "text": {
-                                "content": str(value),
-                            },
-                        },
-                    ],
-                }
-            elif db_type == 'number':
-                properties[column] = {
-                    "number": float(value),
-                }
-            elif db_type == 'select':
-                properties[column] = {
-                    "select": {
-                        "name": str(value),
-                    },
-                }
+        filter = get_filter(schema, mapped_row, map_config)
+        #logger.debug('filter: %s', filter)
+        found = filter_db(client, database_id, filter)
+        #logger.debug('found: %s', json.dumps(found, indent=2, ensure_ascii=False))
+        properties = get_properties(schema, mapped_row)
+        title = [p for p in properties if schema[p]['type'] == 'title']
+        if not title:
+            logger.warning('title not found')
+            continue
         logger.debug('properties: %s', properties)
-        client.pages.create(
-            **{
-                "parent": {
-                    "database_id": database_id,
-                },
-                "properties": properties,
-            }
-        )
+        if found:
+            for item in found:
+                client.pages.update(
+                    **{
+                        "page_id": item['id'],
+                        "properties": properties,
+                    }
+                )
+        else:
+            client.pages.create(
+                **{
+                    "parent": {
+                        "database_id": database_id,
+                    },
+                    "properties": properties,
+                }
+            )
         #logger.debug('properties: %s', properties)
         #break
 
@@ -130,6 +223,16 @@ def main():
         '--map', '-M',
         help='Map file path',
     )
+    parser.add_argument(
+        '--before', '--test',
+        type=int,
+        help='before count',
+    )
+    parser.add_argument(
+        '--after',
+        type=int,
+        help='after count',
+    )
     args = parser.parse_args()
     logger.debug('args: %s', args)
     token = args.token
@@ -151,46 +254,16 @@ def main():
     if ext == '.xlsx':
         df = pd.read_excel(args.file)
         logger.debug('df: \n%s', df)
-        import_df(client, args.database_id, df, map_config=map_config)
+        import_df(
+            client,
+            args.database_id,
+            df,
+            map_config=map_config,
+            before=args.before,
+            after=args.after,
+        )
     else:
         raise ValueError(f'unsupported file extension: {ext}')
-    #res = client.databases.query(
-    #    **{
-    #        "database_id": args.database_id,
-    #    }
-    #)
-    #if not args.simplify:
-    #    dump_json(res)
-    #else:
-    #    rows = simplify(res)
-    #    dump_json(rows)
-    #client.pages.create(
-    #    **{
-    #        "parent": {
-    #            "database_id": args.database_id,
-    #        },
-    #        "properties": {
-    #            #"Name": {
-    #            #    "title": [
-    #            #        {
-    #            #            "text": {
-    #            #                "content": "Hello World",
-    #            #            },
-    #            #        },
-    #            #    ],
-    #            #},
-    #            #"見出し語": {
-    #            #    "title": [
-    #            #        {
-    #            #            "text": {
-    #            #                "content": "Hello World",
-    #            #            },
-    #            #        },
-    #            #    ],
-    #            #},
-    #        },
-    #    }
-    #)
 
 if __name__ == "__main__":
     main()
